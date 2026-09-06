@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+lib/remotion/node_modules/
+lib/remotion/public/
+lib/whisper-models/
+
+# Build output
+dist/
+out/
+*.mp4
+*.webm
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+pipeline.log
+
+workspace/input/*
+workspace/output/*
+workspace/temp/*
+
+pipeline.log
