@@ -115,6 +115,11 @@ func (w *Workspace) FinalOutputFile() string {
 	return filepath.Join(w.OutputDir, fmt.Sprintf("FINAL_SHORTS_%s.mp4", w.EpisodeID))
 }
 
+// TempFile returns: workspace/temp/<episodeID>/<filename>
+func (w *Workspace) TempFile(filename string) string {
+	return filepath.Join(w.EpisodeTemp, filename)
+}
+
 // EnsureInputVideoExists checks whether the input video file exists.
 func (w *Workspace) EnsureInputVideoExists() error {
 	if _, err := os.Stat(w.InputFile()); os.IsNotExist(err) {

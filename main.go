@@ -173,6 +173,34 @@ func main() {
 	}
 	logrus.Infof("✅ Voiceover: %s", voiceoverFile)
 
+	// STEP 4.5: Re-transcribe TTS audio for precise subtitle timing
+	// Convert MP3 to WAV first — whisper-cli miniaudio decoder fails on some MP3 encodings
+	logrus.Info("=== STEP 4.5: TTS Audio Alignment (Precise Subtitle Timing) ===")
+	voiceoverWAV := ws.TempFile("voiceover_for_whisper.wav")
+	if err := ffmpegRenderer.ConvertToWAV(voiceoverFile, voiceoverWAV); err != nil {
+		logrus.Warnf("⚠️  WAV conversion failed, skipping TTS alignment: %v", err)
+	} else {
+		// Create a temporary transcriber configured for Indonesian language ("id")
+		idTranscriber := services.NewTranscriberService(cfg.OpenAIAPIKey, cfg.TranscriptionModel, cfg.OpenAIBaseURL, "id", cfg.HTTPTimeout, cfg.WhisperBinary, cfg.WhisperModelPath, ws.EpisodeTemp)
+		ttsTranscript, err := idTranscriber.TranscribeAudio(voiceoverWAV)
+		if err != nil {
+			logrus.Warnf("⚠️  TTS alignment failed, falling back to LLM subtitles: %v", err)
+		} else {
+			// Update master plan subtitles with precise timings from TTS audio
+			var alignedSubs []services.Subtitle
+			for _, seg := range ttsTranscript.Segments {
+				lines := ffmpegRenderer.SplitSubtitleText(seg.Text)
+				alignedSubs = append(alignedSubs, services.Subtitle{
+					StartTime: seg.Start,
+					EndTime:   seg.End,
+					Text:      strings.Join(lines, "\n"),
+				})
+			}
+			masterPlan.Subtitles = alignedSubs
+			logrus.Infof("✅ Subtitles aligned and split with TTS audio: %d segments", len(alignedSubs))
+		}
+	}
+
 	// Get voiceover duration for timing synchronization
 	voiceoverDuration, err := ffmpegRenderer.GetAudioDuration(voiceoverFile)
 	if err != nil {
