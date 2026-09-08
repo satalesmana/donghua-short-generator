@@ -43,6 +43,98 @@ func normalizeTimestamp(ts string) string {
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
+// CutAndCropClipWithBlur cuts a segment and creates a blurred background layout.
+// The source video fills 1080x1920 as a blurred backdrop, with the main video
+// centered on top at 1080x1350 (leaving space for title/subtitle).
+func (f *FFmpegRendererService) CutAndCropClipWithBlur(inputFile, outputFile, startTime, endTime string) error {
+	startTime = normalizeTimestamp(startTime)
+	endTime = normalizeTimestamp(endTime)
+
+	if startTime == "" || endTime == "" {
+		return fmt.Errorf("start and end timestamps required")
+	}
+
+	videoDuration, err := f.GetVideoDuration(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to get video duration: %w", err)
+	}
+
+	startSec, _ := parseTimestampToSeconds(startTime)
+	endSec, _ := parseTimestampToSeconds(endTime)
+
+	if startSec >= videoDuration {
+		return fmt.Errorf("start time %.0fs exceeds video duration %.0fs", startSec, videoDuration)
+	}
+	if endSec > videoDuration {
+		endTime = fmt.Sprintf("%02d:%02d:%02d", int(videoDuration)/3600, (int(videoDuration)%3600)/60, int(videoDuration)%60)
+		logrus.Warnf("   Clamped end time to %.0fs (video duration)", videoDuration)
+	}
+	if endSec <= startSec {
+		return fmt.Errorf("end time %.0fs must be greater than start time %.0fs", endSec, startSec)
+	}
+
+	// Layout: 1080x1920
+	// Title area:    y=0    to y=160   (160px)
+	// Video area:    y=160  to y=1760  (1600px)
+	// Subtitle area: y=1760 to y=1920 (160px)
+	//
+	// Background: full frame, blurred
+	// Foreground: centered video scaled/cropped to 1080x1600
+	const (
+		outW        = 1080
+		outH        = 1920
+		videoH      = 1600
+		videoYStart = 160
+	)
+
+	// Build a split filtergraph:
+	// [0] → split into [bg] and [fg]
+	// [bg] → scale+crop to fill 1080x1920 + boxblur(20)
+	// [fg] → scale+crop center to 1080x1600 (cover / crop center if width matches)
+	// overlay [fg] onto [bg] at (0, 160)
+	vf := fmt.Sprintf(
+		"[0:v]split=2[bg][fg];"+
+			"[bg]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,boxblur=20:20[blurred];"+
+			"[fg]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d[main];"+
+			"[blurred][main]overlay=0:%d",
+		outW, outH, outW, outH,
+		outW, videoH, outW, videoH,
+		videoYStart,
+	)
+
+	args := []string{
+		"-ss", startTime,
+		"-to", endTime,
+		"-i", inputFile,
+		"-vf", vf,
+		"-an",
+		"-c:v", "libx264",
+		"-crf", "23",
+		"-preset", "medium",
+		"-r", "30",
+		"-y",
+		outputFile,
+	}
+
+	logrus.Debugf("🔪 Cutting clip with blur: %s (%s → %s)", filepath.Base(inputFile), startTime, endTime)
+
+	cmd := exec.Command("ffmpeg", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg cut-blur failed: %v — output: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	info, err := os.Stat(outputFile)
+	if err != nil {
+		return fmt.Errorf("output file not created: %w", err)
+	}
+	if info.Size() < 1000 {
+		return fmt.Errorf("output file too small (%d bytes), likely invalid clip", info.Size())
+	}
+
+	return nil
+}
+
 // CutAndCropClip cuts a segment from the input video and crops it to 9:16 vertical format.
 func (f *FFmpegRendererService) CutAndCropClip(inputFile, outputFile, startTime, endTime string) error {
 	startTime = normalizeTimestamp(startTime)
@@ -258,7 +350,7 @@ func (f *FFmpegRendererService) RenderWithSubtitles(
 		// If the title contains newlines or we want it to wrap nicely within the video width (e.g. max width 900px, w=1080),
 		// FFmpeg drawtext supports word wrapping or explicit newlines (`\n`).
 		// Let's format or wrap the title so it wraps nicely and stays inside the video area.
-		// Since FFmpeg drawtext supports `\n` for newlines if we replace spaces or insert newlines, 
+		// Since FFmpeg drawtext supports `\n` for newlines if we replace spaces or insert newlines,
 		// let's wrap the title text to a maximum of ~25 characters per line so it fits nicely and wraps.
 		wrappedTitle := f.wrapTitleText(title, 25)
 		escapedTitle := strings.ReplaceAll(wrappedTitle, "'", "'\\''")
@@ -267,8 +359,8 @@ func (f *FFmpegRendererService) RenderWithSubtitles(
 	}
 
 	// Add subtitle background box (full-width semi-transparent bar at bottom)
-	// Adjusted height to 440 to accommodate longer text
-	vfParts = append(vfParts, "drawbox=x=0:y=1300:width=1080:height=800:color=#000000@0.7:thickness=fill")
+	// New layout: subtitle area is y=1760 to y=1920 (160px)
+	vfParts = append(vfParts, "drawbox=x=0:y=1760:width=1080:height=160:color=#000000:thickness=fill")
 
 	// Add subtitle overlay
 	vfParts = append(vfParts, fmt.Sprintf(
@@ -330,11 +422,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `)
 
 	// Layout positions based on 1080x1920 (9:16)
-	// Title area: top 5% (Y ≈ 50)
-	// Video area: middle 70%
-	// Subtitle area: center-middle (Y ≈ 150 from bottom = center of drawbox)
-	const titleMarginV = 50     // Title: 50px from top
-	const subtitleMarginV = 300 // Subtitle: lower in drawbox (y=1300 to y=2100)
+	// Title area: top (y=0 to y=160)
+	// Video area: y=160 to y=1760 (height 1600)
+	// Subtitle area: y=1760 to y=1920 (height 160)
+	const titleMarginV = 30    // Title: 30px from top
+	const subtitleMarginV = 50 // Subtitle: center of bottom box (1760 + 160/2 = 1840, from bottom = 1920-1840 = 80, adjusted to 50)
 
 	// Write title if provided (at top of screen) - ONLY via drawtext, NOT in ASS
 	// Title is rendered by FFmpeg drawtext filter, not by ASS file

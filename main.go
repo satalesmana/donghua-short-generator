@@ -46,6 +46,7 @@ func main() {
 	clean := flag.Bool("clean", false, "Clean up temp files after generation")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	promptTemplate := flag.String("prompt", "btth.txt", "System prompt template in templates/")
+	manualTitle := flag.String("title", "", "Manual title overlay (overrides LLM title)")
 	flag.Parse()
 
 	// Setup logging
@@ -139,6 +140,12 @@ func main() {
 		logrus.Fatalf("❌ Master plan generation failed: %v", err)
 	}
 
+	// Override title if manual title flag is provided
+	if *manualTitle != "" {
+		masterPlan.Title = *manualTitle
+		logrus.Infof("📌 Overriding title with manual input: %s", *manualTitle)
+	}
+
 	// Generate subtitle segments from script to ensure 100% match with voiceover
 	// This ensures text and voiceover are always synchronized
 	masterPlan.Subtitles = generateSubtitlesFromScript(masterPlan.ScriptIndonesia)
@@ -190,7 +197,7 @@ func main() {
 	clipFiles := make([]string, 0, len(masterPlan.Clips))
 	for i, clip := range masterPlan.Clips {
 		clipFile := ws.ClipFile(i)
-		err := ffmpegRenderer.CutAndCropClip(ws.InputFile(), clipFile, clip.StartTime, clip.EndTime)
+		err := ffmpegRenderer.CutAndCropClipWithBlur(ws.InputFile(), clipFile, clip.StartTime, clip.EndTime)
 		if err != nil {
 			logrus.Warnf("⚠️  Failed to cut clip %d (%s → %s): %v (skipping)", i, clip.StartTime, clip.EndTime, err)
 			continue
