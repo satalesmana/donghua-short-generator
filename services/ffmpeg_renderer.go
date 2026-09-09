@@ -355,14 +355,14 @@ func (f *FFmpegRendererService) RenderWithSubtitles(
 		wrappedTitle := f.wrapTitleText(title, 25)
 		escapedTitle := strings.ReplaceAll(wrappedTitle, "'", "'\\''")
 		// Changed fontcolor to yellow, added bold, centered x=(w-text_w)/2, y=80 with a slight background box or shadow to make it very readable
-		vfParts = append(vfParts, fmt.Sprintf("drawtext=text='%s':fontsize=48:fontcolor=yellow:fontfile='/Library/Fonts/Arial Bold.ttf':x=(w-text_w)/2:y=80:line_spacing=10:shadowcolor=black:shadowx=2:shadowy=2", escapedTitle))
+		vfParts = append(vfParts, fmt.Sprintf("drawtext=text='%s':fontsize=48:fontcolor=yellow:fontfile='/Library/Fonts/Arial Black.ttf':x=(w-text_w)/2:y=80:line_spacing=10:shadowcolor=black:shadowx=2:shadowy=2", escapedTitle))
 	}
 
-	// Add subtitle background box (full-width semi-transparent bar at bottom)
-	// New layout: subtitle area is y=1760 to y=1920 (160px)
-	vfParts = append(vfParts, "drawbox=x=0:y=1760:width=1080:height=160:color=#000000:thickness=fill")
+	// Add subtitle background box and ensure subtitles are rendered LAST (at the very front/top layer)
+	// User requested height = 200, y = 1760, color = #2D0000
+	vfParts = append(vfParts, "drawbox=x=0:y=1500:width=1080:height=380:color=#3E0F8D:thickness=fill")
 
-	// Add subtitle overlay
+	// Add subtitle overlay (placed at the end of vfParts so it renders on top of everything)
 	vfParts = append(vfParts, fmt.Sprintf(
 		"subtitles='%s'",
 		strings.ReplaceAll(assFile, ":", "\\:"), // Escape colon untuk Windows
@@ -424,9 +424,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 	// Layout positions based on 1080x1920 (9:16)
 	// Title area: top (y=0 to y=160)
 	// Video area: y=160 to y=1760 (height 1600)
-	// Subtitle area: y=1760 to y=1920 (height 160)
+	// Subtitle area: y=1760 to y=1960 (height 200)
 	const titleMarginV = 30    // Title: 30px from top
-	const subtitleMarginV = 50 // Subtitle: center of bottom box (1760 + 160/2 = 1840, from bottom = 1920-1840 = 80, adjusted to 50)
+	const subtitleMarginV = 80 // Subtitle: center of bottom box (1760 + 200/2 = 1860, from bottom = 1920-1860 = 60, adjusted to 80 for visual balance)
 
 	// Write title if provided (at top of screen) - ONLY via drawtext, NOT in ASS
 	// Title is rendered by FFmpeg drawtext filter, not by ASS file
