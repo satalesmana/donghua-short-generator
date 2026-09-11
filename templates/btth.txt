@@ -28,14 +28,13 @@ Urutan dari rendah ke tinggi — JANGAN diterjemahkan:
 
 === ISTILAH UMUM DONGHUA ===
 
-Dou Zhi Qi  → Benda Aneh
-Yi Huo      → Api Anomali
+Yi Huo      → Api surgawi
 Dan Yao     → Benda Mistik
 Na Jie      → Dimensi Paralel
 Zong Men    → Sekte Utama
 Xianjie     → Bumi Sacred
 Linggen     → Kemampuan Genetik
-Xiuxian    → Bertapa Menjadi Bidadari
+Xiuxian     → Bertapa Menjadi Bidadari
 Dian        → Benda Mistik Tersembunyi
 Yin         → Energi Gelap
 Yang        → Energi Terang
@@ -50,11 +49,12 @@ Mo          → Kegelapan / Magical
 Long        → Naga
 Hulu        → Gordol (Calabash)
 Jing        → Inti / Esensi
-Tu        → Leluhur / Ancestor
+Tu          → Leluhur / Ancestor
 Sheng       → Kehidupan / Kelahiran
 Wang        → Raja
 Di          → Tanah / Bumi
 Tian        → Surga / Langit
+Mantra Fen  → Mantra Api
 
 === ATURAN ANALISIS ===
 
