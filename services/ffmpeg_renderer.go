@@ -345,22 +345,27 @@ func (f *FFmpegRendererService) RenderWithSubtitles(
 	// FFmpeg command to merge video, audio, and burn subtitles + title
 	var vfParts []string
 
-	// Add title overlay if provided (using drawtext with text wrapping support via box/line breaks or text file, or split by length/newlines)
+	// Add title overlay using textfile to support multi-line newlines (\n) smoothly without escaping nightmares
 	if title != "" {
-		// If the title contains newlines or we want it to wrap nicely within the video width (e.g. max width 900px, w=1080),
-		// FFmpeg drawtext supports word wrapping or explicit newlines (`\n`).
-		// Let's format or wrap the title so it wraps nicely and stays inside the video area.
-		// Since FFmpeg drawtext supports `\n` for newlines if we replace spaces or insert newlines,
-		// let's wrap the title text to a maximum of ~25 characters per line so it fits nicely and wraps.
-		wrappedTitle := f.wrapTitleText(title, 25)
-		escapedTitle := strings.ReplaceAll(wrappedTitle, "'", "'\\''")
-		// Changed fontcolor to yellow, added bold, centered x=(w-text_w)/2, y=80 with a slight background box or shadow to make it very readable
-		vfParts = append(vfParts, fmt.Sprintf("drawtext=text='%s':fontsize=48:fontcolor=yellow:fontfile='/Library/Fonts/Arial Black.ttf':x=(w-text_w)/2:y=80:line_spacing=10:shadowcolor=black:shadowx=2:shadowy=2", escapedTitle))
+		title = strings.ReplaceAll(title, "\\n", "\n")
+		titleFile := outputFile + ".title.txt"
+		if err := os.WriteFile(titleFile, []byte(title), 0644); err == nil {
+			// Using Arial Bold.ttf for thicker text, and centering properly via drawtext
+			// Note: drawtext by default renders left-aligned per line, but when using textfile with multiple lines,
+			// to make each line center-aligned, we can use the text_align option available in newer ffmpeg,
+			// or box=1:boxcolor=... or simply rely on x=(w-text_w)/2 for single line / text_align=center.
+			// Let's add text_align=center if supported, or ensure proper alignment.
+			vfParts = append(vfParts, fmt.Sprintf(
+				"drawtext=textfile='%s':fontfile='/System/Library/Fonts/Supplemental/Arial Bold.ttf':fontsize=52:fontcolor=yellow:x=(w-text_w)/2:y=80:text_align=center:line_spacing=12:shadowcolor=black:shadowx=2:shadowy=2",
+				strings.ReplaceAll(titleFile, ":", "\\:"),
+			))
+			defer os.Remove(titleFile)
+		}
 	}
 
 	// Add subtitle background box and ensure subtitles are rendered LAST (at the very front/top layer)
 	// User requested height = 200, y = 1760, color = #2D0000
-	vfParts = append(vfParts, "drawbox=x=0:y=1500:width=1080:height=380:color=#3E0F8D:thickness=fill")
+	vfParts = append(vfParts, "drawbox=x=0:y=1500:width=1080:height=400:color=#3E0F8D:thickness=fill")
 
 	// Add subtitle overlay (placed at the end of vfParts so it renders on top of everything)
 	vfParts = append(vfParts, fmt.Sprintf(
@@ -414,7 +419,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,72,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,6,3,2,30,30,100,1
+Style: Default,Arial,72,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,6,3,2,30,30,60,1
 Style: Title,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,30,30,50,1
 
 [Events]
@@ -424,9 +429,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 	// Layout positions based on 1080x1920 (9:16)
 	// Title area: top (y=0 to y=160)
 	// Video area: y=160 to y=1760 (height 1600)
-	// Subtitle area: y=1760 to y=1960 (height 200)
-	const titleMarginV = 30    // Title: 30px from top
-	const subtitleMarginV = 80 // Subtitle: center of bottom box (1760 + 200/2 = 1860, from bottom = 1920-1860 = 60, adjusted to 80 for visual balance)
+	// Subtitle area: y=1500 to y=1920 (height 420)
+	// Alignment=2 (bottom-center), MarginV=60 from bottom
+	const titleMarginV = 30     // Title: 30px from top
+	const subtitleMarginV = 100 // Subtitle: 60px from bottom (Alignment 2 = bottom-center)
 
 	// Write title if provided (at top of screen) - ONLY via drawtext, NOT in ASS
 	// Title is rendered by FFmpeg drawtext filter, not by ASS file

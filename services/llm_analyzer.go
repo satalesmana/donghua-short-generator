@@ -374,6 +374,10 @@ func stripMarkdownFences(s string) string {
 // fixUnescapedNewlines repairs JSON with unescaped newline characters inside strings.
 // Some LLMs return malformed JSON where newlines in string values are not escaped.
 func fixUnescapedNewlines(s string) string {
+	// Fix invalid escape sequences like \N (capital N) which is not valid JSON
+	s = strings.ReplaceAll(s, `\N`, `\n`)
+	s = strings.ReplaceAll(s, `\n`, "\\n") // properly escape newlines
+
 	var sb strings.Builder
 	inString := false
 	escape := false

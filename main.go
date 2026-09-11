@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -47,6 +49,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	promptTemplate := flag.String("prompt", "btth.txt", "System prompt template in templates/")
 	manualTitle := flag.String("title", "", "Manual title overlay (overrides LLM title)")
+	skipIntro := flag.Float64("skip", 180, "Skip first N seconds of audio (intro/music)")
 	flag.Parse()
 
 	// Setup logging
@@ -117,6 +120,34 @@ func main() {
 		logrus.Fatalf("❌ Audio extraction failed: %v", err)
 	}
 	logrus.Infof("✅ Audio extracted: %s", audioFile)
+
+	// =========================================================
+	// STEP 1.5: Skip Intro (trim first N seconds - opening music)
+	// Only trim the ORIGINAL video, NOT the output
+	// =========================================================
+	introSkipSec := *skipIntro
+	if introSkipSec > 0 {
+		logrus.Infof("=== STEP 1.5: Skipping %d seconds of intro (original video only) ===", int(introSkipSec))
+
+		// Trim audio for transcription only (skip intro)
+		skippedAudioFile := ws.TempFile("audio_skipped_intro.wav")
+		args := []string{
+			"-ss", fmt.Sprintf("%.0f", introSkipSec),
+			"-i", audioFile,
+			"-c:a", "pcm_s16le",
+			"-y",
+			skippedAudioFile,
+		}
+		cmd := exec.Command("ffmpeg", args...)
+		_, err := cmd.CombinedOutput()
+		if err != nil {
+			logrus.Warnf("⚠️  Failed to trim intro audio, using full audio: %v", err)
+			introSkipSec = 0
+		} else {
+			audioFile = skippedAudioFile
+			logrus.Infof("✅ Audio trimmed from %.0fs (intro skipped): %s", introSkipSec, audioFile)
+		}
+	}
 
 	// =========================================================
 	// STEP 2: Transcription (Whisper.cpp CLI)
@@ -192,12 +223,18 @@ func main() {
 
 	// =========================================================
 	// STEP 5: Video Clipping (Cut & Crop to 9:16)
+	// NOTE: Video clips ALSO skip intro - timestamps adjusted from original
 	// =========================================================
 	logrus.Info("=== STEP 5: Video Clipping ===")
 	clipFiles := make([]string, 0, len(masterPlan.Clips))
 	for i, clip := range masterPlan.Clips {
 		clipFile := ws.ClipFile(i)
-		err := ffmpegRenderer.CutAndCropClipWithBlur(ws.InputFile(), clipFile, clip.StartTime, clip.EndTime)
+		// Adjust timestamps to skip intro (add introSkipSec to both start and end)
+		startSec, _ := parseTimestampToSeconds(clip.StartTime)
+		endSec, _ := parseTimestampToSeconds(clip.EndTime)
+		adjustedStartTime := fmt.Sprintf("%d:%02d:%02d", int(startSec+introSkipSec)/3600, (int(startSec+introSkipSec)%3600)/60, int(startSec+introSkipSec)%60)
+		adjustedEndTime := fmt.Sprintf("%d:%02d:%02d", int(endSec+introSkipSec)/3600, (int(endSec+introSkipSec)%3600)/60, int(endSec+introSkipSec)%60)
+		err := ffmpegRenderer.CutAndCropClipWithBlur(ws.InputFile(), clipFile, adjustedStartTime, adjustedEndTime)
 		if err != nil {
 			logrus.Warnf("⚠️  Failed to cut clip %d (%s → %s): %v (skipping)", i, clip.StartTime, clip.EndTime, err)
 			continue
@@ -325,4 +362,16 @@ func generateSubtitlesFromScript(script string) []services.Subtitle {
 	}
 
 	return subtitles
+}
+
+// parseTimestampToSeconds converts HH:MM:SS to total seconds (used for intro skip adjustment)
+func parseTimestampToSeconds(ts string) (float64, error) {
+	parts := strings.Split(ts, ":")
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid timestamp format: %s", ts)
+	}
+	hours, _ := strconv.Atoi(parts[0])
+	minutes, _ := strconv.Atoi(parts[1])
+	seconds, _ := strconv.Atoi(parts[2])
+	return float64(hours*3600 + minutes*60 + seconds), nil
 }
