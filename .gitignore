@@ -3,6 +3,7 @@ node_modules/
 lib/remotion/node_modules/
 lib/remotion/public/
 lib/whisper-models/
+dao-clip
 
 # Build output
 dist/
