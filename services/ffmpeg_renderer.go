@@ -13,19 +13,33 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// getFontPath returns a cross-platform path to a bold Arial font.
+// getFontPath returns a cross-platform path to a bold font with good Unicode support.
 func getFontPath() string {
 	switch runtime.GOOS {
 	case "linux":
-		// Common Linux font search paths
+		// Try fonts with best Unicode support for Indonesian text
 		paths := []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+			// Noto Sans (Google) - excellent Unicode coverage
+			"/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+			// Ubuntu font (good Unicode)
+			"/usr/share/fonts/truetype/ubuntu-font-family/Ubuntu-Bold.ttf",
+			// Liberation (good but less complete than Noto)
 			"/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+			// DejaVu (basic Unicode)
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+			// Fallback paths
 			"/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
 			"/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
 			"/usr/local/share/fonts/DejaVuSans-Bold.ttf",
+			// Check if fontconfig can resolve
+			"", // signal to use fontconfig fallback
 		}
 		for _, p := range paths {
+			if p == "" {
+				continue
+			}
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}
@@ -34,10 +48,14 @@ func getFontPath() string {
 		if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Bold.ttf"); err == nil {
 			return "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 		}
+		if _, err := os.Stat("/System/Library/Fonts/STHeiti Light.ttc"); err == nil {
+			return "/System/Library/Fonts/STHeiti Light.ttc"
+		}
 	}
-	// Fallback to a generic name — FFmpeg may still find it via system fonts
+	// Return empty to let FFmpeg use fontconfig fallback
 	return ""
 }
+
 // cropping to 9:16 vertical, concatenating clips, and adding subtitles.
 type FFmpegRendererService struct{}
 
@@ -385,20 +403,21 @@ func (f *FFmpegRendererService) RenderWithSubtitles(
 			if fontPath != "" {
 				fontFileArg = fmt.Sprintf(":fontfile='%s'", strings.ReplaceAll(fontPath, ":", "\\"))
 			} else {
-				logrus.Warnf("⚠️  No bold font found on system, title may not render properly")
+				fontFileArg = ":fontfile='DejaVu Sans'"
+				logrus.Warnf("⚠️  No bold font file found, using fontconfig fallback: DejaVu Sans")
 			}
 			vfParts = append(vfParts, fmt.Sprintf(
 				"drawtext=textfile='%s':fontsize=52:fontcolor=yellow:x=(w-text_w)/2:y=80:text_align=center:line_spacing=12:shadowcolor=black:shadowx=2:shadowy=2%s",
 				strings.ReplaceAll(titleFile, ":", "\\:"),
 				fontFileArg,
-				))
-				defer os.Remove(titleFile)
+			))
+			defer os.Remove(titleFile)
 		}
 	}
 
 	// Add subtitle background box and ensure subtitles are rendered LAST (at the very front/top layer)
 	// Layout: subtitle area is y=1760 to y=1920 (height 160) — matches MarginV=80 from bottom with Alignment=2
-	vfParts = append(vfParts, "drawbox=x=0:y=1760:width=1080:height=160:color=#2D0000:thickness=fill")
+	vfParts = append(vfParts, "drawbox=x=0:y=1500:width=1080:height=400:color=#3E0F8D:thickness=fill")
 
 	// Add subtitle overlay (placed at the end of vfParts so it renders on top of everything)
 	vfParts = append(vfParts, fmt.Sprintf(
@@ -452,8 +471,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,72,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,6,3,2,30,30,80,1
-Style: Title,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,30,30,50,1
+Style: Default,DejaVu Sans,72,&H00FFFFFF,&H000000FF,&H00000000,&HFF2D0000,1,0,0,0,100,100,0,0,3,6,3,2,30,30,80,1
+Style: Title,DejaVu Sans,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,30,30,50,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -464,8 +483,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 	// Video area: y=160 to y=1760 (height 1600)
 	// Subtitle area: y=1760 to y=1920 (height 160)
 	// Alignment=2 (bottom-center), MarginV=80 from bottom
-	const titleMarginV = 30     // Title: 30px from top
-	const subtitleMarginV = 80  // Subtitle: 80px from bottom (Alignment 2 = bottom-center), centered in 160px box
+	const titleMarginV = 30    // Title: 30px from top
+	const subtitleMarginV = 80 // Subtitle: 80px from bottom (Alignment 2 = bottom-center), centered in 160px box
 
 	// Write title if provided (at top of screen) - ONLY via drawtext, NOT in ASS
 	// Title is rendered by FFmpeg drawtext filter, not by ASS file
